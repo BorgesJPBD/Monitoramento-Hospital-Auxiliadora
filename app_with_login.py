@@ -1,4 +1,4 @@
-# app_with_login.py — clean/corporativo (sem seção de Acesso)
+# app_with_login.py — corporativo, sem admin, sem concorrência (ping sequencial)
 import asyncio, json, os, platform, re, shutil
 from dataclasses import dataclass
 from datetime import datetime
@@ -21,41 +21,53 @@ def now_str():
     return datetime.now().strftime("%d/%m/%Y %H:%M:%S")
 
 # =============== ESTILO ===============
-PRIMARY = "#1C7ED6"
 SURFACE = "#0F1115"
-CARD = "#161A22"
-BORDER = "rgba(255,255,255,0.08)"
+CARD    = "#161A22"
+BORDER  = "rgba(255,255,255,0.08)"
 TEXT_MUTED = "rgba(255,255,255,0.72)"
 
 st.markdown(
     f"""
     <style>
       .stApp, body {{ background:{SURFACE}; }}
-      .block-container {{ padding-top: 1.2rem; padding-bottom: 2rem; }}
-      .brand {{ display:flex; gap:18px; align-items:center; }}
-      .brand h1 {{ margin:0; font-size:2rem; line-height:1.1; }}
-      .brand p  {{ margin:.25rem 0 0; color:{TEXT_MUTED}; }}
-      .kpi {{ background:{CARD}; border:1px solid {BORDER}; border-radius:16px; padding:16px; }}
-      .kpi h3 {{ margin:0 0 6px 0; font-size:.9rem; color:{TEXT_MUTED}; letter-spacing:.02em; }}
-      .kpi .value {{ font-size:1.8rem; font-weight:800; }}
-      .box {{ background:{CARD}; border:1px solid {BORDER}; border-radius:16px; padding:18px; }}
-      .box h3 {{ margin:0 0 12px 0; }}
+      /* mais respiro para o cabeçalho */
+      .block-container {{ padding-top: 1.2rem; padding-bottom: 1.6rem; }}
+
+      /* cabeçalho */
+      .brand {{ display:flex; gap:18px; align-items:flex-start; flex-wrap:wrap; }}
+      .brand h1 {{ margin:0; font-size:1.95rem; line-height:1.28; }}
+      .brand p  {{ margin:.35rem 0 0; color:{TEXT_MUTED}; font-size:.98rem; line-height:1.35; }}
+
+      /* logo com altura controlada */
+      .logo img {{ max-height: 78px; width:auto; display:block; }}
+
+      /* KPIs e caixas (mantidos) */
+      .kpi {{ background:{CARD}; border:1px solid {BORDER}; border-radius:14px; padding:14px; }}
+      .kpi h3 {{ margin:0 0 6px 0; font-size:.85rem; color:{TEXT_MUTED}; letter-spacing:.02em; }}
+      .kpi .value {{ font-size:1.6rem; font-weight:800; }}
+      .box {{ background:{CARD}; border:1px solid {BORDER}; border-radius:14px; padding:12px; }}
+      .box h3 {{ margin:0 0 8px 0; font-size:1rem; }}
       .chip {{ display:inline-flex; align-items:center; gap:.5rem; padding:.18rem .6rem; border-radius:999px;
                font-weight:700; font-size:.85rem; }}
       .chip.up   {{ background: rgba(34,197,94,.12); color:#22c55e; border:1px solid rgba(34,197,94,.35); }}
       .chip.down {{ background: rgba(239, 68, 68,.12); color:#ef4444; border:1px solid rgba(239, 68, 68,.35); }}
-      table.pretty {{ width:100%; border-collapse:separate; border-spacing:0; overflow:hidden; border-radius:12px;
-                      border:1px solid {BORDER}; }}
-      table.pretty thead th {{ text-transform:uppercase; font-size:.75rem; letter-spacing:.04em; color:{TEXT_MUTED};
-                               background:{CARD}; padding:10px 12px; border-bottom:1px solid {BORDER}; }}
-      table.pretty tbody td {{ padding:12px; border-bottom:1px solid {BORDER}; }}
+
+      .tblwrap {{ max-height: 520px; overflow:auto; border-radius:12px; border:1px solid {BORDER}; }}
+      table.pretty {{ width:100%; border-collapse:separate; border-spacing:0; }}
+      table.pretty thead th {{ position:sticky; top:0; z-index:1; background:{CARD};
+                               text-transform:uppercase; font-size:.75rem; letter-spacing:.04em; color:{TEXT_MUTED};
+                               padding:10px 12px; border-bottom:1px solid {BORDER}; }}
+      table.pretty tbody td {{ padding:12px; border-bottom:1px solid {BORDER}; background:transparent; }}
       table.pretty tbody tr:nth-child(odd) td {{ background: rgba(255,255,255,0.02); }}
       table.pretty tbody tr:hover td {{ background: rgba(28,126,214,0.08); }}
       label, .stTextInput label {{ font-weight:600; color:{TEXT_MUTED}; }}
+      div[data-baseweb="input"] input {{ height: 38px; }}
+      button[kind="secondary"] {{ height:38px; }}
     </style>
     """,
     unsafe_allow_html=True,
 )
+
 
 # =============== CABEÇALHO ===============
 c0, c1 = st.columns([1.2, 6])
@@ -97,8 +109,7 @@ if "printers" not in st.session_state:
 # =============== SIDEBAR — APENAS CONFIG ===============
 st.sidebar.header("⚙️ Configuração")
 interval_ms = st.sidebar.number_input("Intervalo de atualização (ms)", min_value=500, step=500, value=3000)
-timeout_s = st.sidebar.number_input("Timeout do ping (s)", min_value=0.2, step=0.1, value=1.0, format="%.1f")
-concurrency = st.sidebar.number_input("Concorrência (pings paralelos)", min_value=1, max_value=1000, value=200, step=10)
+timeout_s   = st.sidebar.number_input("Timeout do ping (s)", min_value=0.2, step=0.1, value=1.0, format="%.1f")
 
 # Auto-refresh universal (JS)
 st.markdown(
@@ -113,7 +124,7 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# =============== HELPERS DE PING ===============
+# =============== HELPERS DE PING (SEM CONCORRÊNCIA) ===============
 @dataclass
 class HostResult:
     ip: str
@@ -145,23 +156,22 @@ async def ping_one(ip: str, timeout_s: float) -> HostResult:
     except Exception:
         return HostResult(ip, False, now_str())
 
-async def ping_many(ips: List[str], timeout_s: float, concurrency: int) -> List[HostResult]:
-    sem = asyncio.Semaphore(concurrency)
-    async def wrapped(ip):
-        async with sem:
-            return await ping_one(ip, timeout_s)
-    return await asyncio.gather(*[wrapped(ip) for ip in ips])
+async def ping_many_sequencial(ips: List[str], timeout_s: float) -> List[HostResult]:
+    results: List[HostResult] = []
+    for ip in ips:
+        results.append(await ping_one(ip, timeout_s))
+    return results
 
 def is_valid_ipv4(ip: str) -> bool:
     return bool(re.match(r"^\s*(25[0-5]|2[0-4]\d|[01]?\d?\d)(\.(25[0-5]|2[0-4]\d|[01]?\d?\d)){3}\s*$", ip))
 
-# =============== CADASTRO (sempre habilitado) ===============
+# =============== CADASTRO (todos podem editar) ===============
 st.markdown('<div class="box"><h3>Cadastro de Impressoras</h3>', unsafe_allow_html=True)
-c1, c2, c3, c4 = st.columns([3, 3, 1.2, 1.6])
-ip_input = c1.text_input("IP", placeholder="Ex.: 192.168.1.50")
-setor_input = c2.text_input("Setor", placeholder="Ex.: Almoxarifado")
-add = c3.button("➕ Adicionar", use_container_width=True)
-clear = c4.button("🗑️ Limpar lista", use_container_width=True)
+cIP, cSetor, cAdd, cClear = st.columns([3, 2, 1, 1])
+ip_input    = cIP.text_input("IP", placeholder="Ex.: 192.168.1.50")
+setor_input = cSetor.text_input("Setor", placeholder="Ex.: Almoxarifado")
+add         = cAdd.button("➕ Adicionar", use_container_width=True)
+clear       = cClear.button("🗑️ Limpar lista", use_container_width=True)
 
 if add:
     if not is_valid_ipv4(ip_input.strip()):
@@ -178,14 +188,14 @@ if clear:
 
 if st.session_state.printers:
     ips_existentes = [f"{p['ip']} — {p['setor']}" for p in st.session_state.printers]
-    col_rm1, col_rm2 = st.columns([6,1.2])
-    to_remove = col_rm1.selectbox("Remover", ["(selecionar)"] + ips_existentes, index=0)
-    if col_rm2.button("Remover", use_container_width=True):
-        if to_remove != "(selecionar)":
-            idx = ips_existentes.index(to_remove)
-            removed = st.session_state.printers.pop(idx)
-            save_printers(st.session_state.printers)
-            st.warning(f"Removido: {removed['ip']} — {removed['setor']}")
+    cSel, cBtn = st.columns([5, 1])
+    to_remove = cSel.selectbox("Remover", ["(selecionar)"] + ips_existentes, index=0)
+    rm = cBtn.button("Remover", use_container_width=True, disabled=(to_remove == "(selecionar)"))
+    if rm:
+        idx = ips_existentes.index(to_remove)
+        removed = st.session_state.printers.pop(idx)
+        save_printers(st.session_state.printers)
+        st.warning(f"Removido: {removed['ip']} — {removed['setor']}")
 st.markdown('</div>', unsafe_allow_html=True)
 
 # =============== PING & KPIs ===============
@@ -197,7 +207,7 @@ if not ips:
     st.stop()
 
 with st.spinner("Pingando impressoras..."):
-    results = asyncio.run(ping_many(ips, timeout_s, concurrency))
+    results = asyncio.run(ping_many_sequencial(ips, timeout_s))
 
 total = len(ips)
 up_count = sum(1 for r in results if r.up)
@@ -213,7 +223,7 @@ with k4: st.markdown(f'<div class="kpi"><h3>Última checagem</h3><div class="val
 # filtro rápido
 st.text_input("🔎 Filtro (IP ou Setor)", key="quick_filter", placeholder="Ex.: 192.168.1.10 ou Recepção")
 
-# tabela
+# tabela com scroll
 filtered = []
 q = (st.session_state.quick_filter or "").strip().lower()
 for r in sorted(results, key=lambda x: tuple(int(n) for n in x.ip.split(".")) if x.ip.count(".")==3 else x.ip):
@@ -224,9 +234,9 @@ for r in sorted(results, key=lambda x: tuple(int(n) for n in x.ip.split(".")) if
 
 df = pd.DataFrame(filtered, columns=["IP","Setor","Status","Checado às"])
 st.markdown("### Impressoras")
-st.markdown(df.to_html(escape=False, index=False, classes="pretty"), unsafe_allow_html=True)
+st.markdown(f'<div class="tblwrap">{df.to_html(escape=False, index=False, classes="pretty")}</div>', unsafe_allow_html=True)
 
-# === Exportar CSV (abaixo da tabela, largura total – não corta) ===
+# Exportar CSV (abaixo da tabela)
 csv_bytes = df.assign(Status=df["Status"].str.replace(r"<.*?>","", regex=True)).to_csv(index=False).encode("utf-8")
 st.download_button(
     "⬇️ Exportar CSV",
