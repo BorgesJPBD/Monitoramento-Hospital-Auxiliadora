@@ -1,10 +1,6 @@
 [
   {
-    "ip": "192.168.0.106",
-    "setor": "Endoscopia"
-  },
-  {
-    "ip": "192.165.1.112",
-    "setor": "Ecocardiograma"
+    "ip": "172.165.0.43",
+    "setor": "Recepção CDI"
   }
 ]
