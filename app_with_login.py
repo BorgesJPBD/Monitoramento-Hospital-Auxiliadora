@@ -1,4 +1,4 @@
-# app_with_login.py
+# app_with_login.py — clean/corporativo (sem seção de Acesso)
 import asyncio, json, os, platform, re, shutil
 from dataclasses import dataclass
 from datetime import datetime
@@ -8,60 +8,78 @@ from typing import List
 import pandas as pd
 import streamlit as st
 
-# --------------------- CONFIG ---------------------
+# =============== CONFIG ===============
 st.set_page_config(page_title="Monitor de Impressoras", page_icon="🖨️", layout="wide")
+DATA_PATH = Path("printers.json")
 
-DATA_PATH = Path("printers.json")         # arquivo onde salvamos a lista
-ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "admin")  # defina via variável de ambiente em produção
 DEFAULT_PRINTERS = [
     {"ip": "192.168.1.10", "setor": "Recepção"},
     {"ip": "192.168.1.11", "setor": "Centro Cirúrgico"},
 ]
 
-# --------------------- FUNÇÃO DE DATA/HORA PADRÃO ---------------------
 def now_str():
-    # formato BR (sem "T")
     return datetime.now().strftime("%d/%m/%Y %H:%M:%S")
 
-# --------------------- PÁGINA / ESTILO ---------------------
-st.markdown("""
-<style>
-.block-container {padding-top: 1.2rem; padding-bottom: 2rem;}
-[data-testid="stMetricValue"] { font-weight: 700; }
-.kpi {border-radius: 16px; padding: 14px 16px; border: 1px solid rgba(0,0,0,0.08);}
-.kpi h3 {margin: 0 0 8px 0; font-size: 0.95rem; opacity: 0.85;}
-.box {border: 1px solid rgba(0,0,0,0.08); border-radius: 16px; padding: 16px;}
-thead tr th {text-transform: uppercase; font-size: 0.8rem; letter-spacing: .03em;}
-</style>
-""", unsafe_allow_html=True)
+# =============== ESTILO ===============
+PRIMARY = "#1C7ED6"
+SURFACE = "#0F1115"
+CARD = "#161A22"
+BORDER = "rgba(255,255,255,0.08)"
+TEXT_MUTED = "rgba(255,255,255,0.72)"
 
-# --------------------- CABEÇALHO ---------------------
-c0, c1 = st.columns([1, 6])
+st.markdown(
+    f"""
+    <style>
+      .stApp, body {{ background:{SURFACE}; }}
+      .block-container {{ padding-top: 1.2rem; padding-bottom: 2rem; }}
+      .brand {{ display:flex; gap:18px; align-items:center; }}
+      .brand h1 {{ margin:0; font-size:2rem; line-height:1.1; }}
+      .brand p  {{ margin:.25rem 0 0; color:{TEXT_MUTED}; }}
+      .kpi {{ background:{CARD}; border:1px solid {BORDER}; border-radius:16px; padding:16px; }}
+      .kpi h3 {{ margin:0 0 6px 0; font-size:.9rem; color:{TEXT_MUTED}; letter-spacing:.02em; }}
+      .kpi .value {{ font-size:1.8rem; font-weight:800; }}
+      .box {{ background:{CARD}; border:1px solid {BORDER}; border-radius:16px; padding:18px; }}
+      .box h3 {{ margin:0 0 12px 0; }}
+      .chip {{ display:inline-flex; align-items:center; gap:.5rem; padding:.18rem .6rem; border-radius:999px;
+               font-weight:700; font-size:.85rem; }}
+      .chip.up   {{ background: rgba(34,197,94,.12); color:#22c55e; border:1px solid rgba(34,197,94,.35); }}
+      .chip.down {{ background: rgba(239, 68, 68,.12); color:#ef4444; border:1px solid rgba(239, 68, 68,.35); }}
+      table.pretty {{ width:100%; border-collapse:separate; border-spacing:0; overflow:hidden; border-radius:12px;
+                      border:1px solid {BORDER}; }}
+      table.pretty thead th {{ text-transform:uppercase; font-size:.75rem; letter-spacing:.04em; color:{TEXT_MUTED};
+                               background:{CARD}; padding:10px 12px; border-bottom:1px solid {BORDER}; }}
+      table.pretty tbody td {{ padding:12px; border-bottom:1px solid {BORDER}; }}
+      table.pretty tbody tr:nth-child(odd) td {{ background: rgba(255,255,255,0.02); }}
+      table.pretty tbody tr:hover td {{ background: rgba(28,126,214,0.08); }}
+      label, .stTextInput label {{ font-weight:600; color:{TEXT_MUTED}; }}
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
+# =============== CABEÇALHO ===============
+c0, c1 = st.columns([1.2, 6])
 with c0:
-    try:
-        st.image("static/logo.png", use_container_width=True)  # ajuste o caminho se sua logo estiver em outro local
-    except Exception:
-        pass
+    for p in ("static/logo.png", "logo.png"):
+        try:
+            st.image(p, use_container_width=True)
+            break
+        except Exception:
+            pass
 with c1:
-    st.title("🖨️ Monitor de Impressoras — Ping ICMP")
-    st.caption("Ping periódico • somente admin pode editar a lista")
+    st.markdown(
+        """
+        <div class="brand">
+          <div>
+            <h1>🖨️ Monitor de Impressoras — Ping ICMP</h1>
+            <p>Atualização automática • dashboard corporativo</p>
+          </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
-# --------------------- LOGIN BÁSICO ---------------------
-st.sidebar.header("🔐 Acesso")
-is_admin = False
-if ADMIN_PASSWORD:
-    typed = st.sidebar.text_input("Senha do admin", type="password")
-    if typed and typed == ADMIN_PASSWORD:
-        is_admin = True
-        st.sidebar.success("Você está como ADMIN.")
-    elif typed and typed != ADMIN_PASSWORD:
-        st.sidebar.error("Senha incorreta.")
-else:
-    st.sidebar.info("Defina ADMIN_PASSWORD no ambiente para proteger a edição.")
-    # sem senha definida → edição liberada
-    is_admin = True
-
-# --------------------- CARREGAR/SALVAR ---------------------
+# =============== ESTADO / PERSISTÊNCIA ===============
 def load_printers():
     if DATA_PATH.exists():
         try:
@@ -71,29 +89,42 @@ def load_printers():
     return DEFAULT_PRINTERS.copy()
 
 def save_printers(data: List[dict]):
-    try:
-        DATA_PATH.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-    except Exception as e:
-        st.error(f"Falha ao salvar printers.json: {e}")
+    DATA_PATH.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 
 if "printers" not in st.session_state:
     st.session_state.printers = load_printers()
 
-# --------------------- HELPERS DE PING ---------------------
+# =============== SIDEBAR — APENAS CONFIG ===============
+st.sidebar.header("⚙️ Configuração")
+interval_ms = st.sidebar.number_input("Intervalo de atualização (ms)", min_value=500, step=500, value=3000)
+timeout_s = st.sidebar.number_input("Timeout do ping (s)", min_value=0.2, step=0.1, value=1.0, format="%.1f")
+concurrency = st.sidebar.number_input("Concorrência (pings paralelos)", min_value=1, max_value=1000, value=200, step=10)
+
+# Auto-refresh universal (JS)
+st.markdown(
+    f"""
+    <script>
+      const i = {int(interval_ms)};
+      if (i > 0) {{
+        setTimeout(() => window.location.reload(), i);
+      }}
+    </script>
+    """,
+    unsafe_allow_html=True,
+)
+
+# =============== HELPERS DE PING ===============
 @dataclass
 class HostResult:
     ip: str
     up: bool
-    when: str  # horário da rodada de ping
+    when: str
 
 def build_ping_cmd(ip: str, timeout_s: float):
     sysname = platform.system().lower()
-    if sysname == "linux":
-        return ["ping", "-c", "1", "-W", str(int(timeout_s)), ip]
-    elif sysname == "darwin":
-        return ["ping", "-c", "1", "-W", str(int(timeout_s * 1000)), ip]
-    elif sysname.startswith("win"):
-        return ["ping", "-n", "1", "-w", str(int(timeout_s * 1000)), ip]
+    if sysname == "linux":   return ["ping", "-c", "1", "-W", str(int(timeout_s)), ip]
+    if sysname == "darwin":  return ["ping", "-c", "1", "-W", str(int(timeout_s * 1000)), ip]
+    if sysname.startswith("win"): return ["ping", "-n", "1", "-w", str(int(timeout_s * 1000)), ip]
     return ["ping", "-c", "1", ip]
 
 async def ping_one(ip: str, timeout_s: float) -> HostResult:
@@ -119,70 +150,50 @@ async def ping_many(ips: List[str], timeout_s: float, concurrency: int) -> List[
     async def wrapped(ip):
         async with sem:
             return await ping_one(ip, timeout_s)
-    tasks = [wrapped(ip) for ip in ips]
-    return await asyncio.gather(*tasks)
+    return await asyncio.gather(*[wrapped(ip) for ip in ips])
 
 def is_valid_ipv4(ip: str) -> bool:
     return bool(re.match(r"^\s*(25[0-5]|2[0-4]\d|[01]?\d?\d)(\.(25[0-5]|2[0-4]\d|[01]?\d?\d)){3}\s*$", ip))
 
-# --------------------- SIDEBAR (CONFIG) ---------------------
-st.sidebar.header("⚙️ Configuração")
-interval_ms = st.sidebar.number_input("Intervalo (ms)", min_value=500, step=500, value=3000)
-timeout_s = st.sidebar.number_input("Timeout do ping (s)", min_value=0.2, step=0.1, value=1.0, format="%.1f")
-concurrency = st.sidebar.number_input("Concorrência", min_value=1, max_value=1000, value=200, step=10)
+# =============== CADASTRO (sempre habilitado) ===============
+st.markdown('<div class="box"><h3>Cadastro de Impressoras</h3>', unsafe_allow_html=True)
+c1, c2, c3, c4 = st.columns([3, 3, 1.2, 1.6])
+ip_input = c1.text_input("IP", placeholder="Ex.: 192.168.1.50")
+setor_input = c2.text_input("Setor", placeholder="Ex.: Almoxarifado")
+add = c3.button("➕ Adicionar", use_container_width=True)
+clear = c4.button("🗑️ Limpar lista", use_container_width=True)
 
-# Auto-refresh via JavaScript (dispensa st_autorefresh)
-st.markdown(
-    f"""
-    <script>
-      setTimeout(function() {{
-        window.location.reload();
-      }}, {int(interval_ms)});
-    </script>
-    """,
-    unsafe_allow_html=True
-)
-
-# --------------------- CADASTRO (somente admin) -------------
-st.subheader("Cadastro de Impressoras")
-with st.container():
-    c1, c2, c3, c4 = st.columns([3, 3, 1.2, 1.2])
-    ip_input = c1.text_input("IP", placeholder="Ex.: 192.168.1.50", disabled=not is_admin)
-    setor_input = c2.text_input("Setor", placeholder="Ex.: Almoxarifado", disabled=not is_admin)
-    add_clicked = c3.button("➕ Adicionar", use_container_width=True, disabled=not is_admin)
-    clear_clicked = c4.button("🗑️ Limpar lista", use_container_width=True, disabled=not is_admin)
-
-    if add_clicked:
-        if not ip_input.strip():
-            st.warning("Informe o **IP**.")
-        elif not is_valid_ipv4(ip_input.strip()):
-            st.error("IP inválido. Ex.: 192.168.1.50")
-        else:
-            st.session_state.printers.append({"ip": ip_input.strip(), "setor": setor_input.strip()})
-            save_printers(st.session_state.printers)
-            st.success(f"Adicionado: {ip_input.strip()} — {setor_input.strip() or '(sem setor)'}")
-
-    if clear_clicked:
-        st.session_state.printers = []
+if add:
+    if not is_valid_ipv4(ip_input.strip()):
+        st.error("IP inválido.")
+    else:
+        st.session_state.printers.append({"ip": ip_input.strip(), "setor": setor_input.strip()})
         save_printers(st.session_state.printers)
-        st.info("Lista de impressoras esvaziada.")
+        st.success("Impressora adicionada.")
 
-    if st.session_state.printers:
-        ips_existentes = [f"{p['ip']} — {p['setor']}" for p in st.session_state.printers]
-        col_rm1, col_rm2 = st.columns([6,1.2])
-        to_remove = col_rm1.selectbox("Remover impressora", options=["(selecionar)"] + ips_existentes, index=0, disabled=not is_admin)
-        if col_rm2.button("Remover", use_container_width=True, disabled=not is_admin):
-            if to_remove != "(selecionar)":
-                idx = ips_existentes.index(to_remove)
-                removed = st.session_state.printers.pop(idx)
-                save_printers(st.session_state.printers)
-                st.warning(f"Removido: {removed['ip']} — {removed['setor']}")
+if clear:
+    st.session_state.printers = []
+    save_printers([])
+    st.info("Lista esvaziada.")
 
-# --------------------- PING + DASHBOARD ---------------------
+if st.session_state.printers:
+    ips_existentes = [f"{p['ip']} — {p['setor']}" for p in st.session_state.printers]
+    col_rm1, col_rm2 = st.columns([6,1.2])
+    to_remove = col_rm1.selectbox("Remover", ["(selecionar)"] + ips_existentes, index=0)
+    if col_rm2.button("Remover", use_container_width=True):
+        if to_remove != "(selecionar)":
+            idx = ips_existentes.index(to_remove)
+            removed = st.session_state.printers.pop(idx)
+            save_printers(st.session_state.printers)
+            st.warning(f"Removido: {removed['ip']} — {removed['setor']}")
+st.markdown('</div>', unsafe_allow_html=True)
+
+# =============== PING & KPIs ===============
 ips = [p["ip"] for p in st.session_state.printers]
 setores_map = {p["ip"]: p["setor"] for p in st.session_state.printers}
 
 if not ips:
+    st.info("Adicione ao menos uma impressora para iniciar o monitoramento.")
     st.stop()
 
 with st.spinner("Pingando impressoras..."):
@@ -191,27 +202,36 @@ with st.spinner("Pingando impressoras..."):
 total = len(ips)
 up_count = sum(1 for r in results if r.up)
 down_count = total - up_count
+now_fmt = now_str()
 
 k1, k2, k3, k4 = st.columns(4)
-for col, title, val in [(k1,"Ativas (UP)",up_count),(k2,"Inativas (DOWN)",down_count),(k3,"Total",total)]:
-    with col:
-        st.markdown('<div class="kpi"><h3>'+title+'</h3>', unsafe_allow_html=True)
-        st.metric(label="", value=val)
-        st.markdown('</div>', unsafe_allow_html=True)
-with k4:
-    st.markdown('<div class="kpi"><h3>Última checagem</h3>', unsafe_allow_html=True)
-    st.metric(label="", value=now_str())
-    st.markdown('</div>', unsafe_allow_html=True)
+with k1: st.markdown(f'<div class="kpi"><h3>Ativas (UP)</h3><div class="value">{up_count}</div></div>', unsafe_allow_html=True)
+with k2: st.markdown(f'<div class="kpi"><h3>Inativas (DOWN)</h3><div class="value">{down_count}</div></div>', unsafe_allow_html=True)
+with k3: st.markdown(f'<div class="kpi"><h3>Total</h3><div class="value">{total}</div></div>', unsafe_allow_html=True)
+with k4: st.markdown(f'<div class="kpi"><h3>Última checagem</h3><div class="value">{now_fmt}</div></div>', unsafe_allow_html=True)
 
-rows = [{
-    "IP": r.ip,
-    "Setor": setores_map.get(r.ip, ""),
-    "Status": "🟢 Online" if r.up else "🔴 Offline",
-    "Checado às": now_str(),  # horário desta rodada
-} for r in sorted(results, key=lambda x: tuple(int(n) for n in x.ip.split(".")) if x.ip.count(".")==3 else x.ip)]
+# filtro rápido
+st.text_input("🔎 Filtro (IP ou Setor)", key="quick_filter", placeholder="Ex.: 192.168.1.10 ou Recepção")
 
-df = pd.DataFrame(rows, columns=["IP","Setor","Status","Checado às"])
-st.subheader("Impressoras")
-st.dataframe(df, use_container_width=True, height=min(700, 40 + 35*max(1,len(df))))
+# tabela
+filtered = []
+q = (st.session_state.quick_filter or "").strip().lower()
+for r in sorted(results, key=lambda x: tuple(int(n) for n in x.ip.split(".")) if x.ip.count(".")==3 else x.ip):
+    if q and not (q in r.ip.lower() or q in setores_map.get(r.ip, "").lower()):
+        continue
+    chip = '<span class="chip up">● Ativa</span>' if r.up else '<span class="chip down">● Offline</span>'
+    filtered.append({"IP": r.ip, "Setor": setores_map.get(r.ip, ""), "Status": chip, "Checado às": now_fmt})
 
-st.caption("Somente o admin (senha correta) pode adicionar/remover. Outros acessos ficam em modo leitura.")
+df = pd.DataFrame(filtered, columns=["IP","Setor","Status","Checado às"])
+st.markdown("### Impressoras")
+st.markdown(df.to_html(escape=False, index=False, classes="pretty"), unsafe_allow_html=True)
+
+# === Exportar CSV (abaixo da tabela, largura total – não corta) ===
+csv_bytes = df.assign(Status=df["Status"].str.replace(r"<.*?>","", regex=True)).to_csv(index=False).encode("utf-8")
+st.download_button(
+    "⬇️ Exportar CSV",
+    data=csv_bytes,
+    file_name=f"impressoras_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+    mime="text/csv",
+    use_container_width=True,
+)
