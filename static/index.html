@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <title>Login - Monitor de Impressoras</title>
+  <!-- CSS precisa ser servido pelo Flask em /static/... -->
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <div class="login-container">
+    <!-- Logo também via /static/... -->
+    <img src="/static/logo.png" alt="Logo" class="logo" />
+    <h2>Acesso ao Sistema</h2>
+    <form id="loginForm">
+      <label for="username">Usuário</label>
+      <input type="text" id="username" placeholder="Digite seu usuário" required />
+
+      <label for="password">Senha</label>
+      <input type="password" id="password" placeholder="Digite sua senha" required />
+
+      <button type="submit">Entrar</button>
+      <div id="alert" class="alert"></div>
+    </form>
+  </div>
+
+  <!-- JS também em /static/... -->
+  <script src="/static/script.js"></script>
+</body>
+</html>
